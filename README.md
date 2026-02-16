@@ -16,14 +16,13 @@
 
 ## Installation
 
-The package will be available on PyPI soon.
+The package is available on [PyPI](https://pypi.org/project/dpgmm/):
 
 ```bash
-# Coming soon
-pip install gmm_sampler
+pip install dpgmm
 ```
 
-For now, you can clone the repository and set up the environment using `uv` or `pip`.
+For `triton` accelerated experience, you need to install it `triton` manually. For now, for development on HPC clusters, we recommend building this package from source using `uv` or `pip`.
 
 ## Usage
 
