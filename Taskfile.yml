@@ -1,0 +1,59 @@
+version: "3"
+
+vars:
+  SRC: "src"
+  PROJECT: "."
+
+tasks:
+  audit:
+    desc: Run security audits (Bandit and Safety)
+    cmds:
+      - uv run bandit -r {{.SRC}}
+      - uv export --format requirements-txt > temp_reqs.txt
+      - uv run safety scan -r temp_reqs.txt
+      - rm -f temp_reqs.txt
+    silent: false
+    ignore_error: false
+
+  build:
+    desc: Build the package (sdist and wheel)
+    cmds:
+      - uv build
+
+  build-docs:
+    desc: Build docs in HTML format using PDoc
+    cmds:
+      - pdoc {{.SRC}}/dpgmm -o ./docs --math
+
+  complexity:
+    desc: Check code complexity with Xenon
+    cmds:
+      - uv run xenon --max-absolute B --max-modules B --max-average A {{.SRC}}
+
+  check-all:
+    desc: Run all quality and security checks
+    deps: [lint, audit, complexity]
+    cmds:
+      - echo "All checks passed!"
+
+  lint:
+    desc: Run Ruff formatter and linter
+    cmds:
+      - uv run ruff format {{.PROJECT}}
+      - uv run ruff check {{.PROJECT}} --fix
+
+  lint-ci:
+    desc: Run Ruff formatter and linter in check-only mode
+    cmds:
+      - uv run ruff format {{.PROJECT}} --check
+      - uv run ruff check {{.PROJECT}}
+
+  pre-commit:
+    desc: Run pre-commit hook on all files
+    cmds:
+      - uv run pre-commit run --all-files
+
+  run-tests:
+    desc: Run all PyTest tests
+    cmds:
+      - uv run pytest

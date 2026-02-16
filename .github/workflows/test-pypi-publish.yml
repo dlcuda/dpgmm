@@ -1,0 +1,41 @@
+name: Publish Python package to TestPyPI
+
+on:
+  push:
+    branches:
+      - master
+
+  workflow_dispatch:
+
+concurrency:
+  group: "TestPyPI"
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+
+      - name: Set package release version
+        run: |
+          LATEST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "v0.0.0")
+          uv version ${LATEST_TAG:1}.$(date +'%Y%m%d%H%M%S')
+        shell: bash
+
+      - name: Build and publish to TestPyPI
+        run: >-
+          uv build
+          && uv publish --index testpypi --token ${{ secrets.TEST_PYPI_API_TOKEN }}
