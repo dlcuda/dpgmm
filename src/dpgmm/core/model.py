@@ -15,27 +15,34 @@ class DPGMM:
         sampler: Optional[BaseSampler] = None,
         inference_method: SamplerType = "cgs",
         covariance_type: CovarianceType = "full",
+        device: torch.device = torch.device("cpu"),
         **kwargs,
     ):
+        self.device = device
         if sampler is not None:
             self.sampler = sampler
+            self.sampler.to(self.device)
         else:
             self.sampler = self._build_sampler(
-                inference_method, covariance_type, **kwargs
+                inference_method, covariance_type, device=self.device, **kwargs
             )
 
     def _build_sampler(
-        self, method: SamplerType, cov_type: CovarianceType, **kwargs
+        self,
+        method: SamplerType,
+        cov_type: CovarianceType,
+        device: torch.device,
+        **kwargs,
     ) -> BaseSampler:
         if method == "cgs":
             if cov_type == "full":
                 from dpgmm.samplers import FullCovarianceCollapsedGibbsSampler
 
-                return FullCovarianceCollapsedGibbsSampler(**kwargs)
+                return FullCovarianceCollapsedGibbsSampler(device=device, **kwargs)
             elif cov_type == "diag":
                 from dpgmm.samplers import DiagCovarianceCollapsedGibbsSampler
 
-                return DiagCovarianceCollapsedGibbsSampler(**kwargs)
+                return DiagCovarianceCollapsedGibbsSampler(device=device, **kwargs)
 
         elif method == "vi":
             if cov_type == "full":
@@ -47,9 +54,9 @@ class DPGMM:
             f"Unsupported combination: {method} with {cov_type} covariance."
         )
 
-    def to(self, device: Union[str, torch.device]):
+    def to(self, device: torch.device):
         """Moves the model and its internal state to the specified device."""
-        self.device = torch.device(device)
+        self.device = device
         self.sampler.to(self.device)
 
         return self

@@ -33,6 +33,7 @@ class CollapsedGibbsSampler(ABC, BaseSampler):
         init_strategy: InitStrategy,
         max_clusters_num: int,
         batch_size: int = 1,
+        device: torch.device = torch.device("cpu"),
         **kwargs,
     ) -> None:
         """
@@ -43,6 +44,8 @@ class CollapsedGibbsSampler(ABC, BaseSampler):
             max_clusters_num (int): The maximum initial number of clusters to consider.
             batch_size (int, optional): Number of data points to process in a batch.
                 Defaults to 1.
+            device (torch.device, optional): Device used for sampler tensors.
+                Defaults to CPU.
             **kwargs: Additional hyperparameters, including:
                 - a (float): Alpha prior shape parameter. Defaults to 1.0.
                 - b (float): Alpha prior rate parameter. Defaults to 1.0.
@@ -55,7 +58,7 @@ class CollapsedGibbsSampler(ABC, BaseSampler):
         self.init_strategy = init_strategy
         self.max_clusters_num = max_clusters_num
         self.batch_size = batch_size
-        self.device = torch.device("cpu")
+        self.device = device
 
         self.a = float(kwargs.get("a", 1.0))
         self.b = float(kwargs.get("b", 1.0))
