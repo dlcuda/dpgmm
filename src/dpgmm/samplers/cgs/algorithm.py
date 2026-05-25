@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+import os
 import os.path as op
 import random
 from abc import ABC, abstractmethod
 from typing import Dict, List, Literal, Set, Tuple
 
+import wandb
 import numpy as np
 import torch
 from loguru import logger
@@ -72,6 +74,7 @@ class CollapsedGibbsSampler(ABC, BaseSampler):
             if "restore_snapshot_pkl_path" in kwargs
             else None
         )
+        self._wandb_run = None
 
         logger.info(f"Initialized model: {self.print_model()}")
 
@@ -269,6 +272,8 @@ class CollapsedGibbsSampler(ABC, BaseSampler):
             BaseSamplerFitResult: A dictionary containing the final `cluster_params`, `cluster_assignment`,
                 and `alpha` concentration parameter.
         """
+        self._init_wandb()
+
         if data.device != self.device:
             raise ValueError(
                 f"Data is on device {data.device}, but sampler is set to {self.device}. Please move the sampler to the correct device using .to(device) before calling fit."
@@ -301,6 +306,13 @@ class CollapsedGibbsSampler(ABC, BaseSampler):
                     "curr-alpha: %.2f "
                     % (iter_num, len(cluster_assignment), ass_ll, curr_alpha)
                 )
+
+                if self._wandb_run is not None:
+                    self._wandb_run.log({
+                        "log_likelihood": ass_ll,
+                        "num_clusters": len(cluster_assignment),
+                        "alpha": curr_alpha,
+                    }, step=iter_num)
 
             progress_bar = tqdm(range(0, n_points, self.batch_size))
             for start_batch_index in progress_bar:
@@ -658,6 +670,29 @@ class CollapsedGibbsSampler(ABC, BaseSampler):
             fs_utils.write_pickle(obj, op.join(out_dir, "cgs_%d.pkl" % it_index))
         except Exception as e:
             logger.error(e)
+
+    def _wandb_config(self) -> dict:
+        return {
+            "init_strategy": self.init_strategy,
+            "max_clusters_num": self.max_clusters_num,
+            "batch_size": self.batch_size,
+            "a": self.a,
+            "b": self.b,
+            "alpha_init": self.alpha,
+            "device": str(self.device),
+        }
+
+    def _init_wandb(self) -> None:
+        if wandb.api.api_key is None:
+            logger.info("W&B API key not found, skipping W&B tracking.")
+            return
+        self._wandb_run = wandb.init(
+            entity=os.environ.get("WANDB_ENTITY"),
+            project=os.environ.get("WANDB_PROJECT", "dpgmm"),
+            name=os.environ.get("WANDB_RUN_NAME"),
+            config=self._wandb_config(),
+        )
+        logger.info(f"W&B run initialised: {self._wandb_run.url}")
 
     def print_model(self) -> str:
         """
