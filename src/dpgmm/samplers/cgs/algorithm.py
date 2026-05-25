@@ -6,13 +6,13 @@ import random
 from abc import ABC, abstractmethod
 from typing import Dict, List, Literal, Set, Tuple
 
-import wandb
 import numpy as np
 import torch
 from loguru import logger
 from scipy import stats
 from tqdm import tqdm
 
+import wandb
 from dpgmm.samplers.base import BaseSampler, BaseSamplerFitResult
 from dpgmm.samplers.cgs.state import (
     PriorPosteriorParametersKeeper,
@@ -75,7 +75,7 @@ class CollapsedGibbsSampler(ABC, BaseSampler):
             if "restore_snapshot_pkl_path" in kwargs
             else None
         )
-        self._wandb_run = None
+        self._wandb_run: wandb.Run | None = None
         self.verbose = bool(kwargs.get("verbose", True))
 
         self._log(f"Initialized model: {self.print_model()}")
@@ -707,7 +707,8 @@ class CollapsedGibbsSampler(ABC, BaseSampler):
             config=self._wandb_config(),
             settings=wandb.Settings(silent=not self.verbose),
         )
-        self._log(f"W&B run initialised: {self._wandb_run.url}")
+        if self._wandb_run is not None:
+            self._log(f"W&B run initialised: {self._wandb_run.url}")
 
     def print_model(self) -> str:
         """
