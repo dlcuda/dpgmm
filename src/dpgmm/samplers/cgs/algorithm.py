@@ -369,7 +369,7 @@ class CollapsedGibbsSampler(ABC, BaseSampler):
         return {
             "cluster_params": cluster_params,
             "cluster_assignment": cluster_assignment,
-            "alpha": self.alpha,
+            "alpha": curr_alpha,
         }
 
     def _initialize_fit_state(
