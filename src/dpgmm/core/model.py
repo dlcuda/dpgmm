@@ -43,14 +43,18 @@ class DPGMM:
         if method == "cgs":
             if cov_type == "full":
                 from dpgmm.samplers import FullCovarianceCollapsedGibbsSampler
+
                 return FullCovarianceCollapsedGibbsSampler(device=device, **kwargs)
             elif cov_type == "diag":
                 from dpgmm.samplers import DiagCovarianceCollapsedGibbsSampler
+
                 return DiagCovarianceCollapsedGibbsSampler(device=device, **kwargs)
         elif method == "vi":
             raise NotImplementedError("VI is not implemented yet.")
 
-        raise ValueError(f"Unsupported combination: {method} with {cov_type} covariance.")
+        raise ValueError(
+            f"Unsupported combination: {method} with {cov_type} covariance."
+        )
 
     def to(self, device: torch.device) -> DPGMM:
         self.device = device
@@ -106,28 +110,36 @@ class DPGMM:
         params = result["cluster_params"]
         n_clusters = len(cluster_assignment)
         cluster_sizes = torch.tensor(
-            [len(c) for c in cluster_assignment], dtype=torch.float32, device=self.device
+            [len(c) for c in cluster_assignment],
+            dtype=torch.float32,
+            device=self.device,
         )
         log_weights = torch.log(cluster_sizes / cluster_sizes.sum())  # (K,)
 
         if self.covariance_type == "full":
             from torch.distributions import MultivariateNormal
-            log_pdfs = torch.stack([
-                MultivariateNormal(
-                    loc=params["mean"][k],
-                    scale_tril=params["cov_chol"][k],
-                ).log_prob(x_tensor)
-                for k in range(n_clusters)
-            ])  # (K, N)
+
+            log_pdfs = torch.stack(
+                [
+                    MultivariateNormal(
+                        loc=params["mean"][k],
+                        scale_tril=params["cov_chol"][k],
+                    ).log_prob(x_tensor)
+                    for k in range(n_clusters)
+                ]
+            )  # (K, N)
 
         elif self.covariance_type == "diag":
             from torch.distributions import Normal
-            log_pdfs = torch.stack([
-                Normal(loc=params["mean"][k], scale=params["var"][k].sqrt())
-                .log_prob(x_tensor)
-                .sum(dim=-1)
-                for k in range(n_clusters)
-            ])  # (K, N)
+
+            log_pdfs = torch.stack(
+                [
+                    Normal(loc=params["mean"][k], scale=params["var"][k].sqrt())
+                    .log_prob(x_tensor)
+                    .sum(dim=-1)
+                    for k in range(n_clusters)
+                ]
+            )  # (K, N)
 
         else:
             raise ValueError(f"Unsupported covariance type: {self.covariance_type}")
@@ -157,30 +169,36 @@ class DPGMM:
         params = result["cluster_params"]
         n_clusters = len(cluster_assignment)
         cluster_sizes = torch.tensor(
-            [len(c) for c in cluster_assignment], dtype=torch.float32, device=self.device
+            [len(c) for c in cluster_assignment],
+            dtype=torch.float32,
+            device=self.device,
         )
         log_weights = torch.log(cluster_sizes / cluster_sizes.sum())  # (K,)
 
         if self.covariance_type == "full":
             from torch.distributions import MultivariateNormal
 
-            log_pdfs = torch.stack([
-                MultivariateNormal(
-                    loc=params["mean"][k],
-                    scale_tril=params["cov_chol"][k],
-                ).log_prob(x_tensor)  # (N,)
-                for k in range(n_clusters)
-            ])  # (K, N)
+            log_pdfs = torch.stack(
+                [
+                    MultivariateNormal(
+                        loc=params["mean"][k],
+                        scale_tril=params["cov_chol"][k],
+                    ).log_prob(x_tensor)  # (N,)
+                    for k in range(n_clusters)
+                ]
+            )  # (K, N)
 
         elif self.covariance_type == "diag":
             from torch.distributions import Normal
 
-            log_pdfs = torch.stack([
-                Normal(loc=params["mean"][k], scale=params["var"][k].sqrt())
-                .log_prob(x_tensor)  # (N, D)
-                .sum(dim=-1)         # (N,)
-                for k in range(n_clusters)
-            ])  # (K, N)
+            log_pdfs = torch.stack(
+                [
+                    Normal(loc=params["mean"][k], scale=params["var"][k].sqrt())
+                    .log_prob(x_tensor)  # (N, D)
+                    .sum(dim=-1)  # (N,)
+                    for k in range(n_clusters)
+                ]
+            )  # (K, N)
 
         else:
             raise ValueError(f"Unsupported covariance type: {self.covariance_type}")
