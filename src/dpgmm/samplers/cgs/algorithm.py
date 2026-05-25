@@ -56,6 +56,7 @@ class CollapsedGibbsSampler(ABC, BaseSampler):
                     Defaults to 1.
                 - restore_snapshot_pkl_path (str): Path to a saved model snapshot to resume
                     training. Defaults to None.
+                - verbose (bool): Whether to enable logging output. Defaults to True.
         """
         self.init_strategy = init_strategy
         self.max_clusters_num = max_clusters_num
@@ -75,8 +76,13 @@ class CollapsedGibbsSampler(ABC, BaseSampler):
             else None
         )
         self._wandb_run = None
+        self.verbose = bool(kwargs.get("verbose", True))
 
-        logger.info(f"Initialized model: {self.print_model()}")
+        self._log(f"Initialized model: {self.print_model()}")
+
+    def _log(self, msg: str) -> None:
+        if self.verbose:
+            logger.info(msg)
 
     @abstractmethod
     def posterior_params_names(self) -> list[str]:
@@ -276,7 +282,8 @@ class CollapsedGibbsSampler(ABC, BaseSampler):
 
         if data.device != self.device:
             raise ValueError(
-                f"Data is on device {data.device}, but sampler is set to {self.device}. Please move the sampler to the correct device using .to(device) before calling fit."
+                f"Data is on device {data.device}, but sampler is set to {self.device}. "
+                "Please move the sampler to the correct device using .to(device) before calling fit."
             )
 
         (
@@ -292,7 +299,7 @@ class CollapsedGibbsSampler(ABC, BaseSampler):
             data, cluster_params, self.batch_size
         )
 
-        logger.info("Instantiated computations manager")
+        self._log("Instantiated computations manager")
         ex_permutation = list(range(data.shape[0]))
         res: dict[str, list[torch.Tensor]] = {}
 
@@ -301,20 +308,26 @@ class CollapsedGibbsSampler(ABC, BaseSampler):
                 ass_ll = self.data_log_likelihood(
                     cluster_assignment, data, cluster_params
                 )
-                logger.info(
+                self._log(
                     "Started %d epoch, current clusters number: %d, assignment ll: %.2f, "
-                    "curr-alpha: %.2f "
+                    "curr-alpha: %.2f"
                     % (iter_num, len(cluster_assignment), ass_ll, curr_alpha)
                 )
 
                 if self._wandb_run is not None:
-                    self._wandb_run.log({
-                        "log_likelihood": ass_ll,
-                        "num_clusters": len(cluster_assignment),
-                        "alpha": curr_alpha,
-                    }, step=iter_num)
+                    self._wandb_run.log(
+                        {
+                            "log_likelihood": ass_ll,
+                            "num_clusters": len(cluster_assignment),
+                            "alpha": curr_alpha,
+                        },
+                        step=iter_num,
+                    )
 
-            progress_bar = tqdm(range(0, n_points, self.batch_size))
+            progress_bar = tqdm(
+                range(0, n_points, self.batch_size),
+                disable=not self.verbose,
+            )
             for start_batch_index in progress_bar:
                 curr_alpha = self.update_alpha(
                     curr_alpha, n_points, len(cluster_assignment)
@@ -374,9 +387,13 @@ class CollapsedGibbsSampler(ABC, BaseSampler):
                     curr_alpha,
                     ass_ll,
                 )
-                logger.info("Saved model from iteration: %d" % iter_num)
+                self._log("Saved model from iteration: %d" % iter_num)
 
             random.shuffle(ex_permutation)
+
+        if self._wandb_run is not None:
+            self._wandb_run.finish()
+            self._wandb_run = None
 
         return {
             "cluster_params": cluster_params,
@@ -408,7 +425,7 @@ class CollapsedGibbsSampler(ABC, BaseSampler):
             components_num = len(cluster_assignment)
             examples_assignment = self.get_examples_assignment(cluster_assignment)
             cluster_params = snapshot["cluster_params"]
-            logger.info(
+            self._log(
                 "Restored params from snapshot path: %s, clusters num: %d"
                 % (self.restore_snapshot_pkl_path, components_num)
             )
@@ -433,8 +450,8 @@ class CollapsedGibbsSampler(ABC, BaseSampler):
                 cluster_assignment, data, prior_params
             )
             init_iter = 0
-            logger.info("Initialized params for first assignment")
-            logger.info("Chosen first assignment, clusters num: %d" % components_num)
+            self._log("Initialized params for first assignment")
+            self._log("Chosen first assignment, clusters num: %d" % components_num)
 
         return (
             init_iter,
@@ -597,7 +614,6 @@ class CollapsedGibbsSampler(ABC, BaseSampler):
         }
         for examples in assignment:
             cluster_data = data[list(examples), :]
-
             cluster_params = self.initialize_params_for_cluster(
                 cluster_data, prior_params
             )
@@ -655,8 +671,6 @@ class CollapsedGibbsSampler(ABC, BaseSampler):
             curr_alpha (float): The current value of alpha.
             ll (float): The current log-likelihood of the assignment.
         """
-        import os.path as op
-
         obj = {
             "cluster_assignment": cluster_assignment,
             "cluster_params": cluster_params,
@@ -684,15 +698,16 @@ class CollapsedGibbsSampler(ABC, BaseSampler):
 
     def _init_wandb(self) -> None:
         if wandb.api.api_key is None:
-            logger.info("W&B API key not found, skipping W&B tracking.")
+            self._log("W&B API key not found, skipping W&B tracking.")
             return
         self._wandb_run = wandb.init(
             entity=os.environ.get("WANDB_ENTITY"),
             project=os.environ.get("WANDB_PROJECT", "dpgmm"),
             name=os.environ.get("WANDB_RUN_NAME"),
             config=self._wandb_config(),
+            settings=wandb.Settings(silent=not self.verbose),
         )
-        logger.info(f"W&B run initialised: {self._wandb_run.url}")
+        self._log(f"W&B run initialised: {self._wandb_run.url}")
 
     def print_model(self) -> str:
         """

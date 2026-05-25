@@ -16,7 +16,10 @@ data_visualizer = ClusterParamsVisualizer()
 
 # Full Covariance CGS on Gaussian data with full covariance matrix
 sampler_full = FullCovarianceCollapsedGibbsSampler(
-    init_strategy="init_data_stats", max_clusters_num=10, batch_size=1
+    init_strategy="init_data_stats",
+    max_clusters_num=10,
+    batch_size=1,
+    verbose=False
 )
 
 data_full_tensor = torch.as_tensor(data_full["data"])
@@ -36,7 +39,10 @@ data_visualizer.plot_params_full_covariance(
 
 # Diagonal Covariance CGS on Gaussian data with diagonal covariance matrix
 sampler_diag = DiagCovarianceCollapsedGibbsSampler(
-    init_strategy="init_data_stats", max_clusters_num=10, batch_size=1
+    init_strategy="init_data_stats",
+    max_clusters_num=10,
+    batch_size=1,
+    verbose=False
 )
 
 data_diag_tensor = torch.as_tensor(data_diag["data"])
