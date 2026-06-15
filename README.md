@@ -135,11 +135,23 @@ print(f"KL(Joint || Marginals Prod):  {dkl_joint_prod:.4f}")
 
 ## Integrations & observability
 
-The sampler supports `W&B` out of the box for tracking loss curves, cluster evolution, and system metrics. To enable experiment tracking, just make sure to export `WAND_API_KEY` environment variable.
+## Integrations & observability
+
+The sampler supports W&B out of the box for tracking loss curves, cluster evolution, and system metrics. To enable experiment tracking, run `wandb login` once on your machine (credentials should be cached) or export your API key:
 
 ```bash
 export WANDB_API_KEY=your_key_here
 ```
+
+Optionally, configure the project and run name:
+
+```bash
+export WANDB_PROJECT=dpgmm
+export WANDB_ENTITY=your_team
+export WANDB_RUN_NAME=experiment-1
+```
+
+If neither `wandb login` nor `WANDB_API_KEY` is set, tracking is silently skipped and the sampler runs normally.
 
 ## Benchmarks
 

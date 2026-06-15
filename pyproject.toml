@@ -17,12 +17,13 @@ dependencies = [
     "seaborn>=0.13.2",
     "torch>=2.9.1",
     "tqdm>=4.67.1",
+    "wandb>=0.27.0",
 ]
 
 [dependency-groups]
 dev = [
     "mypy>=1.19.1",
-    "ruff>=0.14.11",
+    "ruff==0.15.17",
     "pre-commit>=4.5.1",
     "bandit>=1.9.3",
     "safety>=3.7.0",
@@ -39,6 +40,13 @@ build-backend = "uv_build"
 ignore_missing_imports = true
 pretty = true
 show_error_codes = true
+
+[tool.ruff.lint]
+extend-select = ["I"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["dpgmm"]
+known-third-party = ["wandb"]
 
 [tool.ruff.lint.per-file-ignores]
 "tests/*" = ["E402"]
