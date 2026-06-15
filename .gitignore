@@ -167,5 +167,3 @@ cython_debug/
 
 # uv.lock
 uv.lock
-
-wandb

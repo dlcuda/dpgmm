@@ -8,11 +8,11 @@ from typing import Dict, List, Literal, Set, Tuple
 
 import numpy as np
 import torch
+import wandb
 from loguru import logger
 from scipy import stats
 from tqdm import tqdm
 
-import wandb
 from dpgmm.samplers.base import BaseSampler, BaseSamplerFitResult
 from dpgmm.samplers.cgs.state import (
     PriorPosteriorParametersKeeper,
