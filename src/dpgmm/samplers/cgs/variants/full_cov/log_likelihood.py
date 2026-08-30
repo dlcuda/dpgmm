@@ -140,12 +140,15 @@ class FullCovarianceLogLikelihood:
             scale (torch.Tensor): The (D, D) positive definite scale matrix.
 
         Returns:
-            torch.Tensor: A (D, D) positive definite inverse-Wishart sample.
+            torch.Tensor: A (D, D) positive definite inverse-Wishart sample,
+                in the same dtype as the input `scale`.
         """
         d = scale.shape[0]
-        dtype, device = scale.dtype, scale.device
+        orig_dtype, device = scale.dtype, scale.device
+        dtype = torch.float64
 
-        chol_scale = torch.linalg.cholesky(scale)
+        scale64 = scale.to(dtype)
+        chol_scale = torch.linalg.cholesky(scale64)
 
         # Bartlett factor: chi-distributed diagonal, standard normal strictly below it.
         diag_dfs = torch.tensor([df - i for i in range(d)], dtype=dtype, device=device)
@@ -157,4 +160,6 @@ class FullCovarianceLogLikelihood:
         bartlett_inv_t = torch.linalg.solve_triangular(bartlett.T, eye, upper=True)
 
         b = chol_scale @ bartlett_inv_t
-        return b @ b.T
+        sigma = b @ b.T
+        sigma = (sigma + sigma.T) / 2  # symmetrize away float rounding asymmetry
+        return sigma.to(orig_dtype)
