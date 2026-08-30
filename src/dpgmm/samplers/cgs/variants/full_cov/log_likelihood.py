@@ -108,21 +108,11 @@ class FullCovarianceLogLikelihood:
         sigmas_chols, means = [], []
         for k, k_examples in enumerate(cluster_assignment):
             k_mean, k_cov_chol = post_means[k], post_cov_chols[k]
-            nu_k = self.nu_0 + len(k_examples)
+            nu_k = max(self.nu_0 + len(k_examples), data_dim + 1)
             kappa_k = init_kappa_0() + len(k_examples)
 
             s_k = k_cov_chol @ k_cov_chol.T
-            s_k_inverse = self._ensure_strict_pd(s_k.inverse(), eps_min=1e-2)
-
-            sigma_k = (
-                torch.distributions.Wishart(
-                    df=max(nu_k, data_dim + 1), covariance_matrix=s_k_inverse
-                )
-                .sample()
-                .inverse()
-            )
-
-            sigma_k = self._ensure_strict_pd(sigma_k, eps_min=1e-3)
+            sigma_k = self._sample_inverse_wishart(df=nu_k, scale=s_k)
 
             mean_k = prob_utils.multivariate_t_rvs(
                 k_mean,
@@ -136,58 +126,35 @@ class FullCovarianceLogLikelihood:
                 df=max(nu_k - data_dim + 1, 1),
             )
 
-            sigmas_chols.append(self._robust_cholesky(sigma_k, eps_start=1e-3))
+            sigmas_chols.append(torch.linalg.cholesky(sigma_k))
             means.append(mean_k)
 
         return means, sigmas_chols
 
-    def _ensure_strict_pd(
-        self, tensor: torch.Tensor, eps_min: float = 1e-2
-    ) -> torch.Tensor:
-        """
-        Projects a matrix to be strictly positive definite by clipping its eigenvalues.
+    def _sample_inverse_wishart(self, df: float, scale: torch.Tensor) -> torch.Tensor:
+        r"""
+        Draws a sample X ~ InverseWishart(df, scale) via the Bartlett decomposition.
 
         Args:
-            tensor (torch.Tensor): The input square matrix.
-            eps_min (float, optional): The minimum allowed eigenvalue. Defaults to 1e-2.
+            df (float): Degrees of freedom. Must satisfy df >= scale.shape[0].
+            scale (torch.Tensor): The (D, D) positive definite scale matrix.
 
         Returns:
-            torch.Tensor: A strictly positive definite matrix.
-
-        Raises:
-            ValueError: If the input tensor is not a square matrix.
+            torch.Tensor: A (D, D) positive definite inverse-Wishart sample.
         """
-        if tensor.ndim != 2 or tensor.shape[0] != tensor.shape[1]:
-            raise ValueError("Input must be a square matrix")
-        tensor_sym = (tensor + tensor.T) / 2
-        eigvals, eigvecs = torch.linalg.eigh(tensor_sym)
-        eigvals_clipped = torch.clamp(eigvals, min=eps_min)
-        tensor_pd = eigvecs @ torch.diag(eigvals_clipped) @ eigvecs.T
-        return tensor_pd
+        d = scale.shape[0]
+        dtype, device = scale.dtype, scale.device
 
-    def _robust_cholesky(
-        self, matrix: torch.Tensor, eps_start: float = 1e-6, max_tries: int = 5
-    ) -> torch.Tensor:
-        """
-        Attempts a Cholesky decomposition, iteratively adding jitter if numerical instability occurs.
+        chol_scale = torch.linalg.cholesky(scale)
 
-        Args:
-            matrix (torch.Tensor): The matrix to decompose.
-            eps_start (float, optional): Initial jitter value to add if decomposition fails. Defaults to 1e-6.
-            max_tries (int, optional): Maximum number of jitter addition attempts. Defaults to 5.
+        # Bartlett factor: chi-distributed diagonal, standard normal strictly below it.
+        diag_dfs = torch.tensor([df - i for i in range(d)], dtype=dtype, device=device)
+        diag_vals = torch.sqrt(torch.distributions.Chi2(diag_dfs).sample())
+        bartlett = torch.randn(d, d, dtype=dtype, device=device).tril(diagonal=-1)
+        bartlett = bartlett + torch.diag(diag_vals)
 
-        Returns:
-            torch.Tensor: The lower Cholesky factor.
+        eye = torch.eye(d, dtype=dtype, device=device)
+        bartlett_inv_t = torch.linalg.solve_triangular(bartlett.T, eye, upper=True)
 
-        Raises:
-            RuntimeError: If the decomposition fails after the maximum number of attempts.
-        """
-        eps = eps_start
-        mat = matrix.clone()
-        for _ in range(max_tries):
-            try:
-                return torch.linalg.cholesky(mat)
-            except RuntimeError:
-                mat = self._ensure_strict_pd(mat, eps_min=eps)
-                eps *= 10
-        raise RuntimeError("Cholesky decomposition failed even after adding jitter")
+        b = chol_scale @ bartlett_inv_t
+        return b @ b.T
