@@ -111,8 +111,9 @@ class FullCovarianceLogLikelihood:
             nu_k = max(self.nu_0 + len(k_examples), data_dim + 1)
             kappa_k = init_kappa_0() + len(k_examples)
 
-            s_k = k_cov_chol @ k_cov_chol.T
-            sigma_k = self._sample_inverse_wishart(df=nu_k, scale=s_k)
+            sigma_chol_k = self._sample_inverse_wishart_chol(
+                df=nu_k, scale_chol=k_cov_chol
+            )
 
             mean_k = prob_utils.multivariate_t_rvs(
                 k_mean,
@@ -126,7 +127,7 @@ class FullCovarianceLogLikelihood:
                 df=max(nu_k - data_dim + 1, 1),
             )
 
-            sigmas_chols.append(torch.linalg.cholesky(sigma_k))
+            sigmas_chols.append(sigma_chol_k)
             means.append(mean_k)
 
         return means, sigmas_chols
@@ -143,12 +144,41 @@ class FullCovarianceLogLikelihood:
             torch.Tensor: A (D, D) positive definite inverse-Wishart sample,
                 in the same dtype as the input `scale`.
         """
-        d = scale.shape[0]
-        orig_dtype, device = scale.dtype, scale.device
+        chol = self._sample_inverse_wishart_chol(
+            df=df, scale_chol=torch.linalg.cholesky(scale.to(torch.float64))
+        )
+        sigma = chol @ chol.T
+        sigma = (sigma + sigma.T) / 2  # symmetrize away float rounding asymmetry
+        return sigma.to(scale.dtype)
+
+    def _sample_inverse_wishart_chol(
+        self, df: float, scale_chol: torch.Tensor
+    ) -> torch.Tensor:
+        r"""
+        Draws X ~ InverseWishart(df, scale) and returns its lower Cholesky factor,
+        given the Cholesky factor of `scale`.
+
+        The sample is built as $X = B B^T$ with $B = L A^{-T}$ (Bartlett), but $X$ is
+        never formed: its Cholesky factor is read off the QR of $B^T$ instead. Forming
+        $X$ would square the condition number, and a subsequent `cholesky` call on it
+        fails outright once a cluster's scale matrix is near-degenerate. Going through
+        QR keeps the conditioning linear in $B$ and cannot fail on a nonsingular $B$.
+
+        Args:
+            df (float): Degrees of freedom. Must satisfy df >= scale_chol.shape[0].
+            scale_chol (torch.Tensor): The lower Cholesky factor (D, D) of the
+                positive definite scale matrix.
+
+        Returns:
+            torch.Tensor: The (D, D) lower triangular Cholesky factor of an
+                inverse-Wishart sample, with positive diagonal, in the same dtype
+                as the input `scale_chol`.
+        """
+        d = scale_chol.shape[0]
+        orig_dtype, device = scale_chol.dtype, scale_chol.device
         dtype = torch.float64
 
-        scale64 = scale.to(dtype)
-        chol_scale = torch.linalg.cholesky(scale64)
+        chol_scale = scale_chol.to(dtype)
 
         # Bartlett factor: chi-distributed diagonal, standard normal strictly below it.
         diag_dfs = torch.tensor([df - i for i in range(d)], dtype=dtype, device=device)
@@ -160,6 +190,14 @@ class FullCovarianceLogLikelihood:
         bartlett_inv_t = torch.linalg.solve_triangular(bartlett.T, eye, upper=True)
 
         b = chol_scale @ bartlett_inv_t
-        sigma = b @ b.T
-        sigma = (sigma + sigma.T) / 2  # symmetrize away float rounding asymmetry
-        return sigma.to(orig_dtype)
+
+        # sigma = b @ b.T. With b.T = Q R, sigma = R.T Q.T Q R = R.T R, so R.T is a
+        # lower triangular factor of sigma obtained without ever forming sigma.
+        r = torch.linalg.qr(b.T, mode="reduced").R
+        # QR leaves the sign of each row of R free; flip so the diagonal is positive,
+        # which makes R.T the Cholesky factor proper. R.T R is unchanged by the flip.
+        signs = torch.sign(torch.diagonal(r))
+        signs = torch.where(signs == 0, torch.ones_like(signs), signs)
+        r = r * signs.unsqueeze(1)
+
+        return r.T.to(orig_dtype)
