@@ -108,21 +108,12 @@ class FullCovarianceLogLikelihood:
         sigmas_chols, means = [], []
         for k, k_examples in enumerate(cluster_assignment):
             k_mean, k_cov_chol = post_means[k], post_cov_chols[k]
-            nu_k = self.nu_0 + len(k_examples)
+            nu_k = max(self.nu_0 + len(k_examples), data_dim + 1)
             kappa_k = init_kappa_0() + len(k_examples)
 
-            s_k = k_cov_chol @ k_cov_chol.T
-            s_k_inverse = self._ensure_strict_pd(s_k.inverse(), eps_min=1e-2)
-
-            sigma_k = (
-                torch.distributions.Wishart(
-                    df=max(nu_k, data_dim + 1), covariance_matrix=s_k_inverse
-                )
-                .sample()
-                .inverse()
+            sigma_chol_k = self._sample_inverse_wishart_chol(
+                df=nu_k, scale_chol=k_cov_chol
             )
-
-            sigma_k = self._ensure_strict_pd(sigma_k, eps_min=1e-3)
 
             mean_k = prob_utils.multivariate_t_rvs(
                 k_mean,
@@ -136,58 +127,77 @@ class FullCovarianceLogLikelihood:
                 df=max(nu_k - data_dim + 1, 1),
             )
 
-            sigmas_chols.append(self._robust_cholesky(sigma_k, eps_start=1e-3))
+            sigmas_chols.append(sigma_chol_k)
             means.append(mean_k)
 
         return means, sigmas_chols
 
-    def _ensure_strict_pd(
-        self, tensor: torch.Tensor, eps_min: float = 1e-2
-    ) -> torch.Tensor:
-        """
-        Projects a matrix to be strictly positive definite by clipping its eigenvalues.
+    def _sample_inverse_wishart(self, df: float, scale: torch.Tensor) -> torch.Tensor:
+        r"""
+        Draws a sample X ~ InverseWishart(df, scale) via the Bartlett decomposition.
 
         Args:
-            tensor (torch.Tensor): The input square matrix.
-            eps_min (float, optional): The minimum allowed eigenvalue. Defaults to 1e-2.
+            df (float): Degrees of freedom. Must satisfy df >= scale.shape[0].
+            scale (torch.Tensor): The (D, D) positive definite scale matrix.
 
         Returns:
-            torch.Tensor: A strictly positive definite matrix.
-
-        Raises:
-            ValueError: If the input tensor is not a square matrix.
+            torch.Tensor: A (D, D) positive definite inverse-Wishart sample,
+                in the same dtype as the input `scale`.
         """
-        if tensor.ndim != 2 or tensor.shape[0] != tensor.shape[1]:
-            raise ValueError("Input must be a square matrix")
-        tensor_sym = (tensor + tensor.T) / 2
-        eigvals, eigvecs = torch.linalg.eigh(tensor_sym)
-        eigvals_clipped = torch.clamp(eigvals, min=eps_min)
-        tensor_pd = eigvecs @ torch.diag(eigvals_clipped) @ eigvecs.T
-        return tensor_pd
+        chol = self._sample_inverse_wishart_chol(
+            df=df, scale_chol=torch.linalg.cholesky(scale.to(torch.float64))
+        )
+        sigma = chol @ chol.T
+        sigma = (sigma + sigma.T) / 2  # symmetrize away float rounding asymmetry
+        return sigma.to(scale.dtype)
 
-    def _robust_cholesky(
-        self, matrix: torch.Tensor, eps_start: float = 1e-6, max_tries: int = 5
+    def _sample_inverse_wishart_chol(
+        self, df: float, scale_chol: torch.Tensor
     ) -> torch.Tensor:
-        """
-        Attempts a Cholesky decomposition, iteratively adding jitter if numerical instability occurs.
+        r"""
+        Draws X ~ InverseWishart(df, scale) and returns its lower Cholesky factor,
+        given the Cholesky factor of `scale`.
+
+        The sample is built as $X = B B^T$ with $B = L A^{-T}$ (Bartlett), but $X$ is
+        never formed: its Cholesky factor is read off the QR of $B^T$ instead. Forming
+        $X$ would square the condition number, and a subsequent `cholesky` call on it
+        fails outright once a cluster's scale matrix is near-degenerate. Going through
+        QR keeps the conditioning linear in $B$ and cannot fail on a nonsingular $B$.
 
         Args:
-            matrix (torch.Tensor): The matrix to decompose.
-            eps_start (float, optional): Initial jitter value to add if decomposition fails. Defaults to 1e-6.
-            max_tries (int, optional): Maximum number of jitter addition attempts. Defaults to 5.
+            df (float): Degrees of freedom. Must satisfy df >= scale_chol.shape[0].
+            scale_chol (torch.Tensor): The lower Cholesky factor (D, D) of the
+                positive definite scale matrix.
 
         Returns:
-            torch.Tensor: The lower Cholesky factor.
-
-        Raises:
-            RuntimeError: If the decomposition fails after the maximum number of attempts.
+            torch.Tensor: The (D, D) lower triangular Cholesky factor of an
+                inverse-Wishart sample, with positive diagonal, in the same dtype
+                as the input `scale_chol`.
         """
-        eps = eps_start
-        mat = matrix.clone()
-        for _ in range(max_tries):
-            try:
-                return torch.linalg.cholesky(mat)
-            except RuntimeError:
-                mat = self._ensure_strict_pd(mat, eps_min=eps)
-                eps *= 10
-        raise RuntimeError("Cholesky decomposition failed even after adding jitter")
+        d = scale_chol.shape[0]
+        orig_dtype, device = scale_chol.dtype, scale_chol.device
+        dtype = torch.float64
+
+        chol_scale = scale_chol.to(dtype)
+
+        # Bartlett factor: chi-distributed diagonal, standard normal strictly below it.
+        diag_dfs = torch.tensor([df - i for i in range(d)], dtype=dtype, device=device)
+        diag_vals = torch.sqrt(torch.distributions.Chi2(diag_dfs).sample())
+        bartlett = torch.randn(d, d, dtype=dtype, device=device).tril(diagonal=-1)
+        bartlett = bartlett + torch.diag(diag_vals)
+
+        eye = torch.eye(d, dtype=dtype, device=device)
+        bartlett_inv_t = torch.linalg.solve_triangular(bartlett.T, eye, upper=True)
+
+        b = chol_scale @ bartlett_inv_t
+
+        # sigma = b @ b.T. With b.T = Q R, sigma = R.T Q.T Q R = R.T R, so R.T is a
+        # lower triangular factor of sigma obtained without ever forming sigma.
+        r = torch.linalg.qr(b.T, mode="reduced").R
+        # QR leaves the sign of each row of R free; flip so the diagonal is positive,
+        # which makes R.T the Cholesky factor proper. R.T R is unchanged by the flip.
+        signs = torch.sign(torch.diagonal(r))
+        signs = torch.where(signs == 0, torch.ones_like(signs), signs)
+        r = r * signs.unsqueeze(1)
+
+        return r.T.to(orig_dtype)
