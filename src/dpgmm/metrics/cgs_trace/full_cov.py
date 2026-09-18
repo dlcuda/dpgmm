@@ -66,7 +66,7 @@ class FullCovTraceReader(TraceReader):
         mean = torch.as_tensor(self.mean[cluster_index], dtype=torch.float32)
         cov_chol = torch.as_tensor(self.cov_chol[cluster_index], dtype=torch.float32)
         cluster_count = torch.tensor(
-            self.cluster_counts[cluster_index], dtype=torch.float32
+            self.cluster_counts[cluster_index], dtype=torch.float32, device=mean.device
         )
 
         kappa_0, nu_0 = self.init_kappa_0(), self.init_nu_0(self.data_dim)
@@ -87,15 +87,6 @@ class FullCovTraceReader(TraceReader):
             dist.Distribution: A `MixtureSameFamily` distribution representing the
                 overall full-covariance mixture.
         """
-        cluster_weights_unnorm = torch.as_tensor(
-            self.get_cluster_unnormalized_weights(), dtype=torch.float32
-        )
-        cluster_weights_norm = cluster_weights_unnorm / torch.sum(
-            cluster_weights_unnorm
-        )
-
-        cat_distr = Categorical(probs=cluster_weights_norm)
-
         t_student_params = [
             self.prepare_full_cov_t_student_params(ind)
             for ind in range(self.clusters_num)
@@ -105,6 +96,15 @@ class FullCovTraceReader(TraceReader):
         means = torch.stack([p.mean for p in t_student_params])
         cov_chols = torch.stack([p.cov_chol for p in t_student_params])
 
+        cluster_weights_unnorm = torch.as_tensor(
+            self.get_cluster_unnormalized_weights(),
+            dtype=torch.float32,
+            device=means.device,
+        )
+        cluster_weights_norm = cluster_weights_unnorm / torch.sum(
+            cluster_weights_unnorm
+        )
+        cat_distr = Categorical(probs=cluster_weights_norm)
         component_dist = MultivariateStudentT(df=dofs, loc=means, scale_tril=cov_chols)
 
         mixture = MixtureSameFamily(cat_distr, component_dist)
