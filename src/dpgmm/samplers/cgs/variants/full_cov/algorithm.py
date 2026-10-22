@@ -34,7 +34,6 @@ class FullCovarianceCollapsedGibbsSampler(CollapsedGibbsSampler):
         cholesky_backend: CholeskyBackend = "auto",
         **kwargs,
     ) -> None:
-        """Select the Cholesky backend used by every parameter keeper."""
         self.cholesky_backend = cholesky_backend
         super().__init__(init_strategy, max_clusters_num, batch_size, device, **kwargs)
 
