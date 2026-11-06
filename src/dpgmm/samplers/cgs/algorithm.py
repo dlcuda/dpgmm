@@ -269,6 +269,9 @@ class CollapsedGibbsSampler(ABC, BaseSampler):
         """
         Executes the main Collapsed Gibbs Sampling loop to fit the model to the data.
 
+        Each iteration is one full sweep over the data. Alpha is sampled once
+        at its start and held fixed for every mini-batch in that sweep.
+
         Args:
             iterations_num (int): The total number of sampling iterations to perform.
             data (torch.Tensor): The input dataset as a torch tensor.
@@ -304,6 +307,9 @@ class CollapsedGibbsSampler(ABC, BaseSampler):
         res: dict[str, list[torch.Tensor]] = {}
 
         for iter_num in range(init_iter, iterations_num):
+            curr_alpha = self.update_alpha(
+                curr_alpha, n_points, len(cluster_assignment)
+            )
             if iter_num % self.skip_epochs_ll_calc == 0:
                 ass_ll = self.data_log_likelihood(
                     cluster_assignment, data, cluster_params
@@ -329,9 +335,6 @@ class CollapsedGibbsSampler(ABC, BaseSampler):
                 disable=not self.verbose,
             )
             for start_batch_index in progress_bar:
-                curr_alpha = self.update_alpha(
-                    curr_alpha, n_points, len(cluster_assignment)
-                )
                 data_point_indices = ex_permutation[
                     start_batch_index : start_batch_index + self.batch_size
                 ]

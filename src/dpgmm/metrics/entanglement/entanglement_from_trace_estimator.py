@@ -43,7 +43,7 @@ class EntanglementFromTraceEstimator(EntanglementEstimator):
         dofs = torch.stack([p.dof for p in all_params])
 
         weights_np = trace_reader.get_cluster_unnormalized_weights()
-        weights = torch.as_tensor(weights_np, dtype=torch.float32)
+        weights = torch.as_tensor(weights_np, dtype=torch.float32, device=means.device)
 
         super().__init__(
             joint_distr=joint_distr,

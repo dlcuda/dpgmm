@@ -5,7 +5,8 @@ from typing import Dict, List, Set
 import torch
 from torch import Tensor, tensor
 
-from dpgmm.samplers.cgs.algorithm import CollapsedGibbsSampler
+from dpgmm.cholesky_update import CholeskyBackend
+from dpgmm.samplers.cgs.algorithm import CollapsedGibbsSampler, InitStrategy
 from dpgmm.samplers.cgs.state import PriorPosteriorParametersKeeper, StudentTCalculator
 from dpgmm.samplers.cgs.variants.base.utils import init_kappa_0, init_nu_0
 from dpgmm.samplers.cgs.variants.full_cov.log_likelihood import (
@@ -22,6 +23,22 @@ class FullCovarianceCollapsedGibbsSampler(CollapsedGibbsSampler):
     Collapsed Gibbs Sampler variant for a Dirichlet Process Gaussian Mixture Model
     utilizing full covariance matrices.
     """
+
+    def __init__(
+        self,
+        init_strategy: InitStrategy,
+        max_clusters_num: int,
+        batch_size: int = 1,
+        device: torch.device = torch.device("cpu"),
+        *,
+        cholesky_backend: CholeskyBackend = "auto",
+        **kwargs,
+    ) -> None:
+        self.cholesky_backend = cholesky_backend
+        super().__init__(init_strategy, max_clusters_num, batch_size, device, **kwargs)
+
+    def _wandb_config(self) -> dict:
+        return {**super()._wandb_config(), "cholesky_backend": self.cholesky_backend}
 
     def posterior_params_names(self) -> List[str]:
         """Returns the names of the tracked posterior parameters."""
@@ -94,7 +111,11 @@ class FullCovarianceCollapsedGibbsSampler(CollapsedGibbsSampler):
     ) -> PriorPosteriorParametersKeeper:
         """Instantiates the state keeper for full covariance parameters."""
         self.params_keeper = FullCovarianceParametersKeeper(
-            data_dim, init_values, components_num, device=self.device
+            data_dim,
+            init_values,
+            components_num,
+            device=self.device,
+            cholesky_backend=self.cholesky_backend,
         )
         return self.params_keeper
 

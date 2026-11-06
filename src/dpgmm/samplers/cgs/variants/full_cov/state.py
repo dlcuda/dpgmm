@@ -5,7 +5,10 @@ from typing import Dict, List, Tuple, Union
 import torch
 from torch import Tensor
 
-from dpgmm.cholesky_update.cholesky_update_adapter import CholeskyUpdateAdapter
+from dpgmm.cholesky_update.cholesky_update_adapter import (
+    CholeskyBackend,
+    CholeskyUpdateAdapter,
+)
 from dpgmm.samplers.cgs.state import PriorPosteriorParametersKeeper
 from dpgmm.samplers.cgs.variants.base.utils import init_kappa_0
 
@@ -37,6 +40,7 @@ class FullCovarianceParametersKeeper(PriorPosteriorParametersKeeper):
         init_values: Dict[str, torch.Tensor],
         n_components: int,
         device: torch.device,
+        cholesky_backend: CholeskyBackend = "auto",
     ):
         """
         Initializes the state tracker with prior and initial posterior parameters.
@@ -55,6 +59,7 @@ class FullCovarianceParametersKeeper(PriorPosteriorParametersKeeper):
         if "cov_chol_0" not in init_values:
             raise ValueError("cov_chol_0 is not defined in init_values")
         self.device = device
+        self.cholesky_backend = cholesky_backend
         self.data_dim = data_dim
         self.cov_chols = torch.as_tensor(
             init_values["cov_chol"], device=self.device, dtype=torch.float32
@@ -74,7 +79,8 @@ class FullCovarianceParametersKeeper(PriorPosteriorParametersKeeper):
         )
         self.n_components = n_components
         self.cholesky_updater = CholeskyUpdateAdapter.get_cholesky_updater(
-            device=self.device
+            device=self.device,
+            backend=self.cholesky_backend
         )
 
     def posterior_parameter_names(self) -> List[str]:
@@ -184,7 +190,7 @@ class FullCovarianceParametersKeeper(PriorPosteriorParametersKeeper):
         self.cov_chol_0 = torch.as_tensor(self.cov_chol_0, device=self.device)
         self.kappa0 = torch.as_tensor(self.kappa0, device=self.device)
         self.cholesky_updater = CholeskyUpdateAdapter.get_cholesky_updater(
-            device=self.device
+            device=self.device, backend=self.cholesky_backend
         )
 
         return self

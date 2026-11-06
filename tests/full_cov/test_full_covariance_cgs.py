@@ -2,6 +2,8 @@ import numpy as np
 import pytest
 import torch
 
+from dpgmm.cholesky_update import CholeskyUpdateAdapter
+from dpgmm.cholesky_update.variants.cholesky_update_torch import CholeskyUpdateTorch
 from dpgmm.samplers.cgs.variants.full_cov.algorithm import (
     FullCovarianceCollapsedGibbsSampler,
 )
@@ -101,3 +103,49 @@ def test_remove_and_reassign(sampler):
     # Point 2 removed from its cluster, cluster becomes empty
     assert clusters_removed[1] is True
     assert examples_assignment[2] == -1
+
+
+def test_explicit_backend_survives_state_device_move(monkeypatch, toy_data):
+    # Falling back to auto here could run a different kernel in a comparison.
+    def require_explicit_torch(device, backend="auto"):
+        assert backend == "torch"
+        return CholeskyUpdateTorch(device)
+
+    monkeypatch.setattr(
+        CholeskyUpdateAdapter, "get_cholesky_updater", require_explicit_torch
+    )
+    sampler = FullCovarianceCollapsedGibbsSampler(
+        "init_data_stats", 2, cholesky_backend="torch", verbose=False
+    ).to(torch.device("cpu"))
+    data = torch.tensor(toy_data)
+    prior = sampler.compute_prior_params(data, 2)
+    posterior = sampler.initialize_params_for_cluster(data[:10], prior)
+    values = {
+        **prior,
+        **{name: value.unsqueeze(0) for name, value in posterior.items()},
+    }
+    keeper = sampler.get_params_keeper(2, values, 1)
+    keeper.to(torch.device("cpu"))
+    assert isinstance(keeper.cholesky_updater, CholeskyUpdateTorch)
+    assert sampler._wandb_config()["cholesky_backend"] == "torch"
+
+
+@pytest.mark.parametrize(
+    "backend", ["triton_full", "triton_full_barrier", "triton_full_local"]
+)
+def test_explicit_triton_backend_does_not_silently_use_cpu_torch(
+    monkeypatch, toy_data, backend
+):
+    monkeypatch.delenv("TRITON_INTERPRET", raising=False)
+    sampler = FullCovarianceCollapsedGibbsSampler(
+        "init_data_stats", 2, cholesky_backend=backend, verbose=False
+    )
+    data = torch.tensor(toy_data)
+    prior = sampler.compute_prior_params(data, 2)
+    posterior = sampler.initialize_params_for_cluster(data[:10], prior)
+    values = {
+        **prior,
+        **{name: value.unsqueeze(0) for name, value in posterior.items()},
+    }
+    with pytest.raises(ValueError, match="Explicit Triton backends require CUDA"):
+        sampler.get_params_keeper(2, values, 1)
