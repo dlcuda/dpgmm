@@ -111,14 +111,17 @@ class CholeskyUpdateTritonFullBarrier(CholeskyUpdateBase):
             chol_diag_sq = chol_diag * chol_diag
             omega_i_sq = omega_i * omega_i
 
-            under_sqrt = chol_diag_sq + (multiplier / bs) * omega_i_sq
+            # IEEE round-to-nearest: Triton's default sqrt and `/` lower to
+            # sqrt.approx / div.full, whose biased error compounds over ~1e5
+            # rank-1 updates per epoch and steadily shrinks the factors.
+            under_sqrt = chol_diag_sq + tl.div_rn(multiplier, bs) * omega_i_sq
             under_sqrt = tl.maximum(under_sqrt, 1e-3)
-            new_chol_diag = tl.sqrt(under_sqrt)
+            new_chol_diag = tl.sqrt_rn(under_sqrt)
 
             gamma = chol_diag_sq * bs + multiplier * omega_i_sq
-            omega_ratio = omega_i / chol_diag
-            new_old_ratio = new_chol_diag / chol_diag
-            second_ratio = new_chol_diag * multiplier * omega_i / gamma
+            omega_ratio = tl.div_rn(omega_i, chol_diag)
+            new_old_ratio = tl.div_rn(new_chol_diag, chol_diag)
+            second_ratio = tl.div_rn(new_chol_diag * multiplier * omega_i, gamma)
 
             res_col = tl.zeros([BLOCK], dtype=tl.float32)
             res_col = tl.where((offs == i) & mask, new_chol_diag, res_col)
